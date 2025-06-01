@@ -5,6 +5,7 @@ pyrightconfig.json
 
 # Python files
 tg_token.py
+__pycache__
 
 # Venv
 .venv
