@@ -1,0 +1,14 @@
+# IDEs
+.vscode
+.idea
+pyrightconfig.json
+
+# Venv
+.venv
+venv
+.env
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
