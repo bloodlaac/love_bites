@@ -3,6 +3,9 @@
 .idea
 pyrightconfig.json
 
+# Python files
+token.py
+
 # Venv
 .venv
 venv
