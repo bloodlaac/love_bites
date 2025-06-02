@@ -1,22 +1,19 @@
 import logging
+import telegram
+
 from tg_token import TOKEN
 
 from telegram import (
     Update,
-    ReplyKeyboardMarkup,
-    ReplyKeyboardRemove,
     InlineKeyboardMarkup,
     InlineKeyboardButton,
-    InputMediaPhoto,
     InputFile
 )
 
 from telegram.ext import (
-    filters,
     ApplicationBuilder,
     ContextTypes,
     CommandHandler,
-    MessageHandler,
     ConversationHandler,
     CallbackQueryHandler,
 )
@@ -46,6 +43,8 @@ price_time_dict = {
     "current_time": 0
 }
 
+FOOD = ["Омлет", "Скрембл", "Блинчики", "Каша", "Кофе", "Чай"]
+
 food_options = [
     [
         InlineKeyboardButton("Омлет с ветчиной 🍳", callback_data="Омлет"),
@@ -58,26 +57,33 @@ food_options = [
 ]
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global FOOD, TOTAL_COST, TOTAL_TIME
     user = update.message.from_user
+
+    FOOD = list(food_dict.keys())
+    TOTAL_COST = 0
+    TOTAL_TIME = 0
 
     await context.bot.send_message(
         chat_id=update.effective_chat.id,
         text=f"Доброе утро, {user.first_name}. Я официант в кафе Вафельки.\n\n"
         "Чем завтракаем сегодня? 😊",
-
-        reply_markup=InlineKeyboardMarkup(food_options)
+        reply_markup=generate_food_buttons()
     )
 
     return FOOD_CHOICE
 
-async def choose_meal_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:    
+async def choose_meal_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:    
     query = update.callback_query
+    await query.answer()
+
     chosen_food = query.data
+    if chosen_food not in FOOD:
+        return FOOD_CHOICE
 
-    cost = food_dict[chosen_food][0]
-    time = food_dict[chosen_food][1]
-    file_name = food_dict[chosen_food][2]
+    FOOD.remove(chosen_food)
 
+    cost, time, file_name = food_dict[chosen_food]
     price_time_dict["current_price"] = cost
     price_time_dict["current_time"] = time
 
@@ -96,9 +102,6 @@ async def choose_meal_button(update: Update, context: ContextTypes.DEFAULT_TYPE)
         [
             InlineKeyboardButton("Добавить в корзину", callback_data="add_to_cart"),
             InlineKeyboardButton("Купить сейчас", callback_data="buy_now")
-        ],
-        [
-            InlineKeyboardButton("Мне расхотелось :(", callback_data="no_need")
         ]
     ]
 
@@ -110,11 +113,22 @@ async def choose_meal_button(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     return BUYING_DECITION
 
+def generate_food_buttons() -> InlineKeyboardMarkup:
+    buttons = [
+        InlineKeyboardButton(name, callback_data=name)
+        for name in FOOD
+    ]
+    buttons.append(InlineKeyboardButton("🍽 Завершить заказ", callback_data="finish_order"))
+    
+    button_rows = [buttons[i:i+2] for i in range(0, len(buttons), 2)]
+
+    return InlineKeyboardMarkup(button_rows)
+
 async def is_in_cart(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global TOTAL_COST, TOTAL_TIME
-    
+
     query = update.callback_query
-    print(query.data)
+    await query.answer()
 
     match query.data:
         case "add_to_cart":
@@ -125,40 +139,37 @@ async def is_in_cart(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 chat_id=update.effective_chat.id,
                 text=(
                     f"Общая стоимость завтрака: {TOTAL_COST} поцелуйчиков\n"
-                    f"Время приготовления: {TOTAL_TIME} минут"
+                    f"Время приготовления: {TOTAL_TIME} минут\n\n"
+                    f"Хотите выбрать что-то ещё?"
                 ),
-                reply_markup=InlineKeyboardMarkup(food_options)
-                # query = update.
+                reply_markup=generate_food_buttons()
             )
+            return FOOD_CHOICE
 
-            #return FOOD_CHOICE
-        
         case "buy_now":
             TOTAL_COST += price_time_dict["current_price"]
             TOTAL_TIME += price_time_dict["current_time"]
 
-            await update.message.reply_text(
-                f"Общая стоимость завтрака: {TOTAL_COST} поцелуйчиков\n"
-                f"Время приготовления: {TOTAL_TIME} минут\n\n"
-                f"⏰Ожидайте ваш завтрак"
+        case "finish_order":
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text=(
+                    f"💋 Итоговая стоимость: {TOTAL_COST} поцелуйчиков.\n"
+                    f"⏳ Время приготовления: {TOTAL_TIME} минут.\n\n"
+                    f"☺️ Спасибо за заказ! Приятного аппетита!"
+                )
             )
-
             return ConversationHandler.END
-        
-        case "no_need":
-            ...
 
-async def next_actions(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    user_action = update.message.reply_markup
-    
-    print(user_action)
 
-async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    await update.message.reply_text(
-        "Bye! I hope we can talk again some day.",
-        reply_markup=ReplyKeyboardRemove()
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text=(
+            f"💋 Итоговая стоимость: {TOTAL_COST} поцелуйчиков.\n"
+            f"⏳ Время приготовления: {TOTAL_TIME} минут.\n\n"
+            f"☺️ Спасибо за заказ!"
+        )
     )
-
     return ConversationHandler.END
 
 def main() -> None:
@@ -167,17 +178,18 @@ def main() -> None:
     conversation_handler = ConversationHandler(
         entry_points=[CommandHandler("start", start)],
         states={
-            FOOD_CHOICE: [CallbackQueryHandler(choose_meal_button)],
-            BUYING_DECITION: [CallbackQueryHandler(is_in_cart)]
+            FOOD_CHOICE: [
+                CallbackQueryHandler(choose_meal_button, pattern="^(Омлет|Скрембл|Блинчики|Каша|Кофе|Чай)$"),
+                CallbackQueryHandler(is_in_cart, pattern="^finish_order$")
+            ],
+            BUYING_DECITION: [
+                CallbackQueryHandler(is_in_cart, pattern="^(add_to_cart|buy_now)$")
+            ]
         },
-        fallbacks=[CommandHandler("cancel", cancel)]
+        fallbacks=[]
     )
 
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CallbackQueryHandler(choose_meal_button, pattern="^(Омлет|Скрембл|Блинчики|Каша)$"))
-    application.add_handler(CallbackQueryHandler(is_in_cart, pattern="^(add_to_cart|buy_now|no_need)$"))
-    application.add_handler(CallbackQueryHandler(next_actions))
-    #application.add_handler(CommandHandler("help", help_command))
+    application.add_handler(conversation_handler)
 
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
